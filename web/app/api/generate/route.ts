@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backendError, backendFetch, isDemoMode } from "@/lib/backend";
 import { createDemoJob } from "@/lib/demo";
+import { cloudGenerate, isCloud } from "@/lib/skyreelsCloud";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -11,6 +12,12 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  // Hosted SkyReels Cloud API (some modes, e.g. restyling/lip-sync, need no prompt).
+  if (isCloud()) {
+    const result = await cloudGenerate(body);
+    return NextResponse.json(result.body, { status: result.status });
   }
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";

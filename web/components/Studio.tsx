@@ -57,7 +57,7 @@ export default function Studio({ demo }: { demo: boolean }) {
   const [resolution, setResolution] = useState<string>("540P");
   const [seed, setSeed] = useState<string>("");
   const [prompt, setPrompt] = useState<string>("");
-  const [paramValues, setParamValues] = useState<Record<string, number | boolean>>({});
+  const [paramValues, setParamValues] = useState<Record<string, number | boolean | string>>({});
   const [inputValues, setInputValues] = useState<Record<string, InputValue>>({});
 
   const [health, setHealth] = useState<{ gpu_available?: boolean; mock?: boolean } | null>(null);
@@ -75,9 +75,10 @@ export default function Studio({ demo }: { demo: boolean }) {
     const model = m.models[0];
     setModelId(model?.id || "");
     setResolution(model?.resolution || m.resolutions[0] || "540P");
-    const defaults: Record<string, number | boolean> = {};
+    const defaults: Record<string, number | boolean | string> = {};
     for (const p of m.params) {
-      defaults[p.key] = (p.default ?? (p.kind === "bool" ? false : p.min ?? 0)) as number | boolean;
+      const fallback = p.kind === "bool" ? false : p.kind === "select" ? p.options?.[0] ?? "" : p.min ?? 0;
+      defaults[p.key] = (p.default ?? fallback) as number | boolean | string;
     }
     setParamValues(defaults);
     setInputValues({});
@@ -141,7 +142,7 @@ export default function Studio({ demo }: { demo: boolean }) {
   const fps = (paramValues.fps as number) || 24;
 
   /* actions */
-  const setParam = (k: string, v: number | boolean) => setParamValues((s) => ({ ...s, [k]: v }));
+  const setParam = (k: string, v: number | boolean | string) => setParamValues((s) => ({ ...s, [k]: v }));
   const setInput = (field: string, v: InputValue) => setInputValues((s) => ({ ...s, [field]: v }));
 
   function randomizeSeed() {
@@ -583,9 +584,10 @@ function ResultMeta({ job }: { job: Job }) {
   const p = job.params || {};
   return (
     <div className="result-meta">
-      <span className="chip">seed <b className="mono">{job.seed}</b></span>
+      {job.seed != null && <span className="chip">seed <b className="mono">{job.seed}</b></span>}
       {typeof p.resolution === "string" && <span className="chip"><b>{p.resolution}</b></span>}
       {job.family && <span className="chip"><b>{job.family.toUpperCase()}</b></span>}
+      {typeof p.cost_credits === "number" && <span className="chip"><b className="mono">{p.cost_credits}</b> credits</span>}
       {job.elapsed_seconds != null && <span className="chip"><b className="mono">{job.elapsed_seconds}s</b></span>}
       {job.video_url ? (
         <a className="btn btn-ghost btn-sm" href={job.video_url} download style={{ marginLeft: "auto" }}>
@@ -629,7 +631,7 @@ function DynamicInput({
   value,
   onChange,
 }: {
-  spec: { kind: string; field: string; label: string; required?: boolean; min?: number; max?: number; allow_url?: boolean; accept?: string };
+  spec: { kind: string; field: string; label: string; required?: boolean; min?: number; max?: number; allow_url?: boolean; url_only?: boolean; accept?: string };
   value: InputValue;
   onChange: (v: InputValue) => void;
 }) {
@@ -641,6 +643,7 @@ function DynamicInput({
         values={Array.isArray(value) ? value : []}
         onChange={(arr) => onChange(arr)}
         allowUrl={spec.allow_url}
+        urlOnly={spec.url_only}
       />
     );
   }
@@ -652,6 +655,7 @@ function DynamicInput({
         accept={spec.accept}
         value={typeof value === "string" ? value : null}
         onChange={(v) => onChange(v)}
+        urlOnly={spec.url_only}
       />
     );
   }
@@ -662,6 +666,7 @@ function DynamicInput({
       value={typeof value === "string" ? value : null}
       onChange={(v) => onChange(v)}
       allowUrl={spec.allow_url}
+      urlOnly={spec.url_only}
     />
   );
 }
@@ -671,14 +676,48 @@ function ImageField({
   value,
   onChange,
   allowUrl,
+  urlOnly,
 }: {
   label: string;
   value: string | null;
   onChange: (v: string | null) => void;
   allowUrl?: boolean;
+  urlOnly?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [showUrl, setShowUrl] = useState(false);
+
+  if (urlOnly) {
+    return (
+      <div className="field" style={{ marginBottom: 0 }}>
+        <label className="lbl">
+          <span>
+            <IconLink /> {label}
+          </span>
+        </label>
+        {value ? (
+          <div className="media-filled">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={value} alt={label} style={{ width: 34, height: 34, borderRadius: 6, objectFit: "cover" }} />
+            <span className="media-name mono">{value}</span>
+            <button type="button" className="dz-remove static" onClick={() => onChange(null)}>
+              <IconX />
+            </button>
+          </div>
+        ) : (
+          <input
+            type="text"
+            placeholder="https://…/image.png"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onChange((e.target as HTMLInputElement).value.trim() || null);
+            }}
+            onBlur={(e) => e.target.value.trim() && onChange(e.target.value.trim())}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="field" style={{ marginBottom: 0 }}>
       <label className="lbl">
@@ -736,12 +775,14 @@ function RefImagesField({
   values,
   onChange,
   allowUrl,
+  urlOnly,
 }: {
   label: string;
   max: number;
   values: string[];
   onChange: (v: string[]) => void;
   allowUrl?: boolean;
+  urlOnly?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
@@ -763,7 +804,7 @@ function RefImagesField({
             </button>
           </div>
         ))}
-        {values.length < max && (
+        {values.length < max && !urlOnly && (
           <div className="ref-slot add" onClick={() => inputRef.current?.click()}>
             <IconPlus />
             <input
@@ -817,12 +858,14 @@ function MediaUrlField({
   accept,
   value,
   onChange,
+  urlOnly,
 }: {
   label: string;
   kind: "video" | "audio";
   accept?: string;
   value: string | null;
   onChange: (v: string | null) => void;
+  urlOnly?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const isData = value?.startsWith("data:");
@@ -848,22 +891,28 @@ function MediaUrlField({
             }}
             onBlur={(e) => e.target.value.trim() && onChange(e.target.value.trim())}
           />
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => inputRef.current?.click()}>
-            <IconUpload />
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            accept={accept || (kind === "video" ? "video/*" : "audio/*")}
-            hidden
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (f) onChange(await fileToDataURL(f));
-            }}
-          />
+          {!urlOnly && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => inputRef.current?.click()}>
+              <IconUpload />
+            </button>
+          )}
+          {!urlOnly && (
+            <input
+              ref={inputRef}
+              type="file"
+              accept={accept || (kind === "video" ? "video/*" : "audio/*")}
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (f) onChange(await fileToDataURL(f));
+              }}
+            />
+          )}
         </div>
       )}
-      <div className="mono field-hint">Paste a URL (recommended) or upload a small file.</div>
+      <div className="mono field-hint">
+        {urlOnly ? "Paste a public URL to the file." : "Paste a URL (recommended) or upload a small file."}
+      </div>
     </div>
   );
 }
@@ -877,9 +926,9 @@ function ParamControl({
   onChange,
 }: {
   spec: ParamSpec;
-  value: number | boolean | undefined;
+  value: number | boolean | string | undefined;
   fps: number;
-  onChange: (v: number | boolean) => void;
+  onChange: (v: number | boolean | string) => void;
 }) {
   if (spec.kind === "bool") {
     return (
@@ -889,6 +938,26 @@ function ParamControl({
         on={value === true}
         onChange={(v) => onChange(v)}
       />
+    );
+  }
+  if (spec.kind === "select") {
+    const val = typeof value === "string" ? value : String(spec.default ?? spec.options?.[0] ?? "");
+    return (
+      <div className="field">
+        <label className="lbl">{spec.label}</label>
+        <select value={val} onChange={(e) => onChange(e.target.value)}>
+          {(spec.options || []).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        {spec.hint && (
+          <div className="mono field-hint" style={{ marginTop: 7 }}>
+            {spec.hint}
+          </div>
+        )}
+      </div>
     );
   }
   const num = typeof value === "number" ? value : (spec.default as number) ?? spec.min ?? 0;

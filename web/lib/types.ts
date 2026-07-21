@@ -1,4 +1,4 @@
-export type ParamKind = "int" | "float" | "frames" | "seconds" | "bool";
+export type ParamKind = "int" | "float" | "frames" | "seconds" | "bool" | "select";
 export type InputKind = "image" | "ref_images" | "end_image" | "video" | "audio";
 
 export interface ModelInfo {
@@ -15,6 +15,7 @@ export interface InputSpec {
   min?: number;
   max?: number;
   allow_url?: boolean;
+  url_only?: boolean; // hosted API accepts URLs only (no base64 upload)
   accept?: string;
 }
 
@@ -25,7 +26,8 @@ export interface ParamSpec {
   min?: number;
   max?: number;
   step?: number;
-  default?: number | boolean;
+  default?: number | boolean | string;
+  options?: string[]; // for kind "select"
   unit?: string;
   advanced?: boolean;
   hint?: string;

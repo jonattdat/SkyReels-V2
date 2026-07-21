@@ -13,6 +13,24 @@ its controls from that. One front-end therefore drives either family — a V2 ba
 (`api_server.py` in this repo) or a V3 backend (`api_server.py` in the SkyReels-V3 repo).
 With no backend configured it runs a self-contained demo of every mode.
 
+## Quickest path to real video: the hosted SkyReels API (no GPU)
+
+The studio has a built-in adapter for **SkyReels' own hosted API** — the easiest way to get
+real output, since you don't run any GPU. Get a key at
+[skyreels.ai](https://www.skyreels.ai) (Account → API Keys), then set two env vars:
+
+```
+SKYREELS_API_URL=https://api-gateway.skyreels.ai
+SKYREELS_API_KEY=your-skyreels-api-key
+```
+
+The studio auto-detects the hosted API and switches its catalog to the hosted models —
+**Text-to-Video** and **Image-to-Video** (V4), **Reference-to-Video**, **Video Extension**,
+**Shot-Switching**, **Video Restyling** (V3), **Talking Avatar**, and **Lip-sync**.
+Text-to-Video needs no uploads at all; the media modes take **public URLs** (the hosted API
+does not accept file uploads). The API key stays server-side — it is injected by the Next.js
+routes and never exposed to the browser.
+
 ---
 
 ## Why it's split in two

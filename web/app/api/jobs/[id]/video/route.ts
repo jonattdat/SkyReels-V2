@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backendError, backendFetch, isDemoMode } from "@/lib/backend";
 import { isDemoId } from "@/lib/demo";
+import { cloudPoll, isCloud } from "@/lib/skyreelsCloud";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  if (isCloud() && !isDemoId(id)) {
+    // The hosted result is a public URL; redirect to it.
+    const job = await cloudPoll(id);
+    if (job.video_url) return NextResponse.redirect(job.video_url);
+    return NextResponse.json({ error: "Video not ready" }, { status: 404 });
+  }
 
   if (isDemoId(id) || isDemoMode()) {
     return NextResponse.json(
