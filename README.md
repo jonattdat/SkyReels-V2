@@ -53,6 +53,27 @@ The demos above showcase 30-second videos generated using our SkyReels-V2 Diffus
 - [ ] Checkpoints of the Step & Guidance Distill Model
 
 
+## 🌐 Web Studio (Vercel front-end)
+
+A ready-to-deploy web UI for SkyReels-V2 lives in [`web/`](web/), paired with a lightweight
+REST API server ([`api_server.py`](api_server.py)) that wraps the T2V / I2V / Diffusion-Forcing
+pipelines. Deploy the front-end to **Vercel** (set the project root directory to `web/`) and
+point it at a GPU host running the API via the `SKYREELS_API_URL` environment variable. With
+no backend configured the site runs in a self-contained **demo mode**, so the deployed URL is
+interactive immediately.
+
+```bash
+# GPU host — serve the model over HTTP
+pip install -r requirements.txt requirements-api.txt
+python api_server.py                     # or: SKYREELS_MOCK=1 python api_server.py (no GPU)
+
+# Front-end — local dev
+cd web && npm install && npm run dev
+```
+
+See [`web/README.md`](web/README.md) for the full architecture and deployment guide.
+
+
 ## 🚀 Quickstart
 
 #### Installation
