@@ -79,3 +79,35 @@ export const IconX = (p: SVGProps<SVGSVGElement>) => (
     <path d="M6 6l12 12M18 6L6 18" />
   </svg>
 );
+
+export const IconVideo = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="6" width="13" height="12" rx="2" />
+    <path d="M16 10l5-3v10l-5-3z" />
+  </svg>
+);
+
+export const IconAudio = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2" />
+  </svg>
+);
+
+export const IconLayers = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <path d="M12 3l9 5-9 5-9-5 9-5z" />
+    <path d="M3 13l9 5 9-5" />
+  </svg>
+);
+
+export const IconLink = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p} width={15} height={15}>
+    <path d="M9 15l6-6M10 6l1-1a4 4 0 016 6l-1 1M14 18l-1 1a4 4 0 01-6-6l1-1" />
+  </svg>
+);
+
+export const IconPlus = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p} width={20} height={20}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);

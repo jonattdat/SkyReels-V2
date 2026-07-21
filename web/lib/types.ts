@@ -1,4 +1,58 @@
-export type Mode = "t2v" | "i2v" | "df";
+export type ParamKind = "int" | "float" | "frames" | "seconds" | "bool";
+export type InputKind = "image" | "ref_images" | "end_image" | "video" | "audio";
+
+export interface ModelInfo {
+  id: string;
+  params: string;
+  resolution: string;
+}
+
+export interface InputSpec {
+  kind: InputKind;
+  field: string;
+  label: string;
+  required?: boolean;
+  min?: number;
+  max?: number;
+  allow_url?: boolean;
+  accept?: string;
+}
+
+export interface ParamSpec {
+  key: string;
+  label: string;
+  kind: ParamKind;
+  min?: number;
+  max?: number;
+  step?: number;
+  default?: number | boolean;
+  unit?: string;
+  advanced?: boolean;
+  hint?: string;
+}
+
+export interface ModeSpec {
+  id: string;
+  label: string;
+  family: string; // "v2" | "v3"
+  badge: string;
+  blurb?: string;
+  models: ModelInfo[];
+  resolutions: string[];
+  prompt_required?: boolean;
+  prompt_tags?: string[];
+  inputs: InputSpec[];
+  params: ParamSpec[];
+}
+
+export interface ModelsResponse {
+  family?: string;
+  label?: string;
+  modes: ModeSpec[];
+  resolutions: string[];
+  demo?: boolean;
+  degraded?: boolean;
+}
 
 export type JobStatus =
   | "queued"
@@ -9,49 +63,9 @@ export type JobStatus =
   | "failed"
   | "canceled";
 
-export interface ModelInfo {
-  id: string;
-  mode: Mode;
-  params: string;
-  resolution: string;
-}
-
-export interface ModelsResponse {
-  models: ModelInfo[];
-  modes: { id: Mode; label: string }[];
-  resolutions: string[];
-  demo?: boolean;
-}
-
-export interface GenerateParams {
-  prompt: string;
-  mode: Mode;
-  model_id?: string | null;
-  resolution: string;
-  num_frames: number;
-  inference_steps: number;
-  guidance_scale: number;
-  shift: number;
-  fps: number;
-  seed?: number | null;
-  negative_prompt?: string | null;
-  prompt_enhancer: boolean;
-  offload?: boolean | null;
-  teacache: boolean;
-  teacache_thresh: number;
-  use_ret_steps: boolean;
-  image?: string | null;
-  end_image?: string | null;
-  ar_step: number;
-  causal_attention: boolean;
-  causal_block_size: number;
-  base_num_frames: number;
-  overlap_history?: number | null;
-  addnoise_condition: number;
-}
-
 export interface Job {
   id: string;
+  family?: string;
   status: JobStatus;
   progress: number;
   stage: string;
@@ -67,3 +81,8 @@ export interface Job {
   params: Record<string, unknown>;
   demo?: boolean;
 }
+
+export const FAMILY_LABELS: Record<string, string> = {
+  v2: "SkyReels V2",
+  v3: "SkyReels V3",
+};

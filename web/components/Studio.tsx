@@ -1,87 +1,42 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Job, Mode, ModelInfo, ModelsResponse } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FAMILY_LABELS,
+  type Job,
+  type ModeSpec,
+  type ModelsResponse,
+  type ParamSpec,
+} from "@/lib/types";
 import DemoFilm from "./DemoFilm";
 import {
   IconAperture,
+  IconAudio,
   IconBolt,
   IconDice,
   IconDownload,
-  IconImage,
-  IconInfinity,
+  IconLayers,
+  IconLink,
+  IconPlus,
   IconSparkle,
-  IconText,
   IconUpload,
+  IconVideo,
   IconX,
 } from "./icons";
 
-/* ------------------------------------------------------------------ state */
-
-interface Form {
-  prompt: string;
-  mode: Mode;
-  model_id: string;
-  resolution: string;
-  num_frames: number;
-  steps: number;
-  guidance: number;
-  shift: number;
-  fps: number;
-  seed: string;
-  promptEnhancer: boolean;
-  teacache: boolean;
-  offload: boolean;
-  image: string | null;
-  endImage: string | null;
-  arStep: number;
-  causalAttention: boolean;
-  causalBlockSize: number;
-  addnoise: number;
-}
-
-const DEFAULT_FORM: Form = {
-  prompt: "",
-  mode: "t2v",
-  model_id: "",
-  resolution: "540P",
-  num_frames: 97,
-  steps: 30,
-  guidance: 6.0,
-  shift: 8.0,
-  fps: 24,
-  seed: "",
-  promptEnhancer: false,
-  teacache: false,
-  offload: false,
-  image: null,
-  endImage: null,
-  arStep: 0,
-  causalAttention: false,
-  causalBlockSize: 1,
-  addnoise: 0,
-};
+type InputValue = string | string[] | null;
 
 const EXAMPLE_PROMPTS = [
   "A serene lake surrounded by towering mountains, with a few swans gracefully gliding across the water and sunlight dancing on the surface.",
-  "A woman in a leather jacket and sunglasses riding a vintage motorcycle through a desert highway at sunset, her hair blowing wildly in the wind as the golden sun casts long shadows.",
+  "A woman in a leather jacket and sunglasses riding a vintage motorcycle through a desert highway at sunset, her hair blowing wildly in the wind.",
   "Close-up of raindrops sliding down a neon-lit window on a rainy Tokyo street at night, glowing bokeh reflections, cinematic shallow depth of field.",
   "An astronaut drifting weightless inside a sunlit space station, dust particles floating through soft volumetric light, slow graceful motion.",
   "A red fox trotting through a snowy pine forest at dawn, its breath visible in the frozen air as gentle snowflakes drift down.",
 ];
 
-const MODE_META: Record<Mode, { label: string; sub: string; icon: React.ReactNode }> = {
-  t2v: { label: "Text", sub: "T2V", icon: <IconText /> },
-  i2v: { label: "Image", sub: "I2V", icon: <IconImage /> },
-  df: { label: "Forcing", sub: "DF", icon: <IconInfinity /> },
-};
-
 const ACTIVE = new Set(["queued", "loading", "generating", "encoding"]);
 const isActive = (s?: string) => !!s && ACTIVE.has(s);
-
-function cssVars(vars: Record<string, string>): React.CSSProperties {
-  return vars as React.CSSProperties;
-}
+const cssVars = (v: Record<string, string>) => v as React.CSSProperties;
 
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -95,8 +50,16 @@ function fileToDataURL(file: File): Promise<string> {
 /* -------------------------------------------------------------- component */
 
 export default function Studio({ demo }: { demo: boolean }) {
-  const [form, setForm] = useState<Form>(DEFAULT_FORM);
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modes, setModes] = useState<ModeSpec[]>([]);
+  const [catalogLabel, setCatalogLabel] = useState<string>("");
+  const [modeId, setModeId] = useState<string>("");
+  const [modelId, setModelId] = useState<string>("");
+  const [resolution, setResolution] = useState<string>("540P");
+  const [seed, setSeed] = useState<string>("");
+  const [prompt, setPrompt] = useState<string>("");
+  const [paramValues, setParamValues] = useState<Record<string, number | boolean>>({});
+  const [inputValues, setInputValues] = useState<Record<string, InputValue>>({});
+
   const [health, setHealth] = useState<{ gpu_available?: boolean; mock?: boolean } | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [gallery, setGallery] = useState<Job[]>([]);
@@ -105,34 +68,35 @@ export default function Studio({ demo }: { demo: boolean }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
 
-  const set = useCallback(<K extends keyof Form>(k: K, v: Form[K]) => {
-    setForm((f) => ({ ...f, [k]: v }));
+  const mode = useMemo(() => modes.find((m) => m.id === modeId), [modes, modeId]);
+
+  const applyMode = useCallback((m: ModeSpec) => {
+    setModeId(m.id);
+    const model = m.models[0];
+    setModelId(model?.id || "");
+    setResolution(model?.resolution || m.resolutions[0] || "540P");
+    const defaults: Record<string, number | boolean> = {};
+    for (const p of m.params) {
+      defaults[p.key] = (p.default ?? (p.kind === "bool" ? false : p.min ?? 0)) as number | boolean;
+    }
+    setParamValues(defaults);
+    setInputValues({});
+    setError(null);
   }, []);
 
   /* load catalog + health */
   useEffect(() => {
     fetch("/api/models")
       .then((r) => r.json())
-      .then((d: ModelsResponse) => setModels(d.models || []))
+      .then((d: ModelsResponse) => {
+        const list = d.modes || [];
+        setModes(list);
+        setCatalogLabel(d.label || "");
+        if (list.length) applyMode(list[0]);
+      })
       .catch(() => {});
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => {});
-  }, []);
-
-  /* keep model_id valid for the chosen mode */
-  useEffect(() => {
-    if (!models.length) return;
-    const candidates = models.filter((m) => m.mode === form.mode);
-    if (!candidates.length) return;
-    setForm((f) => {
-      if (candidates.some((m) => m.id === f.model_id)) return f;
-      const match =
-        candidates.find((m) => m.resolution === f.resolution) || candidates[0];
-      return { ...f, model_id: match.id, resolution: match.resolution };
-    });
-  }, [form.mode, models]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetch("/api/health").then((r) => r.json()).then(setHealth).catch(() => {});
+  }, [applyMode]);
 
   /* poll the active job */
   useEffect(() => {
@@ -149,7 +113,7 @@ export default function Studio({ demo }: { demo: boolean }) {
           setGallery((g) => (g.some((x) => x.id === data.id) ? g : [data, ...g].slice(0, 12)));
         }
       } catch {
-        /* transient network error — keep polling */
+        /* transient */
       }
     }, demo ? 750 : 1500);
     return () => {
@@ -158,70 +122,82 @@ export default function Studio({ demo }: { demo: boolean }) {
     };
   }, [job?.id, job?.status, demo]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const modeCandidates = models.filter((m) => m.mode === form.mode);
-  const activeModel = models.find((m) => m.id === form.model_id);
+  const familyGroups = useMemo(() => {
+    const order: string[] = [];
+    const map = new Map<string, ModeSpec[]>();
+    for (const m of modes) {
+      if (!map.has(m.family)) {
+        map.set(m.family, []);
+        order.push(m.family);
+      }
+      map.get(m.family)!.push(m);
+    }
+    return order.map((f) => ({ family: f, modes: map.get(f)! }));
+  }, [modes]);
+
+  const activeModel = mode?.models.find((m) => m.id === modelId);
+  const visibleParams = mode?.params.filter((p) => !p.advanced) || [];
+  const advancedParams = mode?.params.filter((p) => p.advanced) || [];
+  const fps = (paramValues.fps as number) || 24;
 
   /* actions */
+  const setParam = (k: string, v: number | boolean) => setParamValues((s) => ({ ...s, [k]: v }));
+  const setInput = (field: string, v: InputValue) => setInputValues((s) => ({ ...s, [field]: v }));
+
   function randomizeSeed() {
-    set("seed", String(Math.floor(Math.random() * 4294967294)));
+    setSeed(String(Math.floor(Math.random() * 4294967294)));
   }
   function surprisePrompt() {
-    const pick = EXAMPLE_PROMPTS[Math.floor(Math.random() * EXAMPLE_PROMPTS.length)];
-    set("prompt", pick);
-  }
-
-  async function handleImage(file: File | undefined, which: "image" | "endImage") {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setError("Please choose an image file.");
-      return;
-    }
-    const url = await fileToDataURL(file);
-    set(which, url);
+    setPrompt(EXAMPLE_PROMPTS[Math.floor(Math.random() * EXAMPLE_PROMPTS.length)]);
   }
 
   function buildBody() {
-    const seed = form.seed.trim() === "" ? null : Number(form.seed);
+    if (!mode) return {};
     const body: Record<string, unknown> = {
-      prompt: form.prompt.trim(),
-      mode: form.mode,
-      model_id: form.model_id || null,
-      resolution: form.resolution,
-      num_frames: form.num_frames,
-      inference_steps: form.steps,
-      guidance_scale: form.guidance,
-      shift: form.shift,
-      fps: form.fps,
-      seed: Number.isFinite(seed as number) ? seed : null,
-      prompt_enhancer: form.promptEnhancer,
-      teacache: form.teacache,
-      offload: form.offload,
+      mode: mode.id,
+      family: mode.family,
+      model_id: modelId || null,
+      resolution,
+      prompt: prompt.trim(),
+      seed: seed.trim() === "" ? null : Number(seed),
+      ...paramValues,
     };
-    if (form.mode === "i2v" || form.mode === "df") {
-      if (form.image) body.image = form.image;
-    }
-    if (form.mode === "df") {
-      if (form.endImage) body.end_image = form.endImage;
-      body.ar_step = form.arStep;
-      body.causal_attention = form.causalAttention;
-      body.causal_block_size = form.causalBlockSize;
-      body.base_num_frames = 97;
-      body.addnoise_condition = form.addnoise;
-      if (form.num_frames > 97) body.overlap_history = 17;
+    for (const inp of mode.inputs) {
+      const v = inputValues[inp.field];
+      if (inp.kind === "ref_images") {
+        const arr = Array.isArray(v) ? v.filter(Boolean) : [];
+        if (arr.length) body[inp.field] = arr;
+      } else if (typeof v === "string" && v) {
+        body[inp.field] = v;
+      }
     }
     return body;
   }
 
+  function validate(): string | null {
+    if (!mode) return "No generation mode available.";
+    if (mode.prompt_required && !prompt.trim()) return "Write a prompt to begin.";
+    if (demo) return null; // demo ignores media inputs
+    for (const inp of mode.inputs) {
+      if (!inp.required) continue;
+      const v = inputValues[inp.field];
+      if (inp.kind === "ref_images") {
+        if (!Array.isArray(v) || v.filter(Boolean).length === 0)
+          return `Add at least one ${inp.label.toLowerCase()}.`;
+      } else if (!v) {
+        return `${inp.label} is required.`;
+      }
+    }
+    return null;
+  }
+
   async function onGenerate() {
+    const problem = validate();
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setError(null);
-    if (!form.prompt.trim()) {
-      setError("Write a prompt to begin.");
-      return;
-    }
-    if (form.mode === "i2v" && !form.image && !demo) {
-      setError("Image-to-Video needs a source image.");
-      return;
-    }
     setSubmitting(true);
     try {
       const res = await fetch("/api/generate", {
@@ -230,9 +206,8 @@ export default function Studio({ demo }: { demo: boolean }) {
         body: JSON.stringify(buildBody()),
       });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Could not start generation.");
-      } else {
+      if (!res.ok) setError(data.error || "Could not start generation.");
+      else {
         setJob(data);
         viewportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
@@ -244,8 +219,6 @@ export default function Studio({ demo }: { demo: boolean }) {
   }
 
   const busy = submitting || isActive(job?.status);
-  const seconds = (form.num_frames / form.fps).toFixed(1);
-  const longVideo = form.mode === "df" && form.num_frames > 97;
 
   /* status pill */
   let pillClass = "dot";
@@ -263,7 +236,6 @@ export default function Studio({ demo }: { demo: boolean }) {
 
   return (
     <>
-      {/* ---------------------------------------------------------- topbar */}
       <header className="topbar reveal d1">
         <div className="brand">
           <span className="brand-mark">
@@ -271,9 +243,9 @@ export default function Studio({ demo }: { demo: boolean }) {
           </span>
           <span>
             <span className="brand-name">
-              Sky<b>Reels</b> V2
+              Sky<b>Reels</b> Studio
             </span>
-            <span className="brand-sub">Generative Film Studio</span>
+            <span className="brand-sub">{catalogLabel || "Generative Film Studio"}</span>
           </span>
         </div>
         <span className="status-pill">
@@ -283,64 +255,71 @@ export default function Studio({ demo }: { demo: boolean }) {
       </header>
 
       <main className="shell">
-        {/* ------------------------------------------------------- hero */}
         <section className="hero reveal d2">
           <h1>
             Direct light into <span className="glow">motion.</span>
           </h1>
           <p>
-            A studio front-end for SkyReels-V2 — the open-source, infinite-length
-            film model. Compose a prompt, shape the parameters, and render
-            text-to-video, image-to-video, or diffusion-forced long takes.
+            One studio for the open-source SkyReels film models — V2 text/image
+            video and diffusion-forced long takes, plus V3 reference-to-video,
+            video extension, and audio-driven talking avatars.
           </p>
         </section>
 
-        {/* ----------------------------------------------------- studio */}
         <div className="studio">
-          {/* ============ LEFT: prompt + viewport ============ */}
+          {/* ============ LEFT: prompt + inputs + viewport ============ */}
           <div className="reveal d3">
             <div className="panel panel-pad" style={{ marginBottom: 24 }}>
-              <div className="field">
+              {mode?.prompt_tags && mode.prompt_tags.length > 0 && (
+                <div className="field">
+                  <label className="lbl">Shot transition</label>
+                  <div className="tag-row">
+                    {mode.prompt_tags.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className="tag-chip"
+                        onClick={() => setPrompt((p) => `${t} ${p.replace(/^\[[^\]]*\]\s*/, "")}`.trimEnd() + " ")}
+                      >
+                        {t.replace(/[[\]]/g, "").replace(/_/g, " ").toLowerCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="field" style={{ marginBottom: mode && mode.inputs.length ? 18 : 0 }}>
                 <label className="lbl" htmlFor="prompt">
-                  Prompt
+                  Prompt {mode && !mode.prompt_required && <span className="val">optional</span>}
                   <button className="btn btn-ghost btn-sm" onClick={surprisePrompt} type="button">
                     <IconSparkle /> Surprise me
                   </button>
                 </label>
                 <textarea
                   id="prompt"
-                  value={form.prompt}
-                  onChange={(e) => set("prompt", e.target.value)}
-                  placeholder="A cinematic wide shot of…"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder={mode?.prompt_required ? "A cinematic wide shot of…" : "Optional guiding prompt…"}
                 />
               </div>
 
-              {(form.mode === "i2v" || form.mode === "df") && (
-                <div className="grid-2">
-                  <ImageField
-                    label={form.mode === "df" ? "Start frame" : "Source image"}
-                    value={form.image}
-                    onPick={(f) => handleImage(f, "image")}
-                    onClear={() => set("image", null)}
-                  />
-                  {form.mode === "df" && (
-                    <ImageField
-                      label="End frame (optional)"
-                      value={form.endImage}
-                      onPick={(f) => handleImage(f, "endImage")}
-                      onClear={() => set("endImage", null)}
+              {mode && mode.inputs.length > 0 && (
+                <div className="input-grid">
+                  {mode.inputs.map((inp) => (
+                    <DynamicInput
+                      key={inp.field}
+                      spec={inp}
+                      value={inputValues[inp.field] ?? null}
+                      onChange={(v) => setInput(inp.field, v)}
                     />
-                  )}
+                  ))}
                 </div>
               )}
             </div>
 
-            {/* viewport */}
             <div className="panel panel-pad" ref={viewportRef}>
               <Viewport job={job} demo={demo} />
-              {job && !isActive(job.status) && job.status === "completed" && (
-                <ResultMeta job={job} />
-              )}
+              {job && job.status === "completed" && <ResultMeta job={job} />}
               {error && (
                 <div className="note err" style={{ marginTop: 16 }}>
                   <IconX /> <span>{error}</span>
@@ -350,114 +329,93 @@ export default function Studio({ demo }: { demo: boolean }) {
           </div>
 
           {/* ============ RIGHT: controls ============ */}
-          <aside
-            className="panel reveal d4"
-            style={{ position: "sticky", top: 20 }}
-          >
+          <aside className="panel reveal d4" style={{ position: "sticky", top: 20 }}>
             <div className="panel-head">
               <h3>Controls</h3>
-              <span className="eyebrow">{MODE_META[form.mode].sub}</span>
+              {mode && <span className="eyebrow">{mode.badge}</span>}
             </div>
             <div className="panel-pad">
-              {/* mode */}
+              {/* mode, grouped by family */}
               <div className="field">
                 <label className="lbl">Generation mode</label>
-                <div className="segmented">
-                  {(Object.keys(MODE_META) as Mode[]).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      data-active={form.mode === m}
-                      onClick={() => set("mode", m)}
-                    >
-                      {MODE_META[m].label}
-                      <span className="sub">{MODE_META[m].sub}</span>
-                    </button>
-                  ))}
-                </div>
+                {familyGroups.map((g) => (
+                  <div key={g.family} style={{ marginBottom: 10 }}>
+                    {familyGroups.length > 1 && (
+                      <div className="family-label">{FAMILY_LABELS[g.family] || g.family}</div>
+                    )}
+                    <div className="mode-grid">
+                      {g.modes.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          data-active={modeId === m.id}
+                          className="mode-btn"
+                          onClick={() => applyMode(m)}
+                        >
+                          {m.label}
+                          <span className="sub">{m.badge}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
+
+              {mode?.blurb && <p className="mode-blurb">{mode.blurb}</p>}
 
               {/* model */}
-              <div className="field">
-                <label className="lbl" htmlFor="model">
-                  Model
-                  {activeModel && <span className="val">{activeModel.params}</span>}
-                </label>
-                <select
-                  id="model"
-                  value={form.model_id}
-                  onChange={(e) => {
-                    const m = models.find((x) => x.id === e.target.value);
-                    setForm((f) => ({
-                      ...f,
-                      model_id: e.target.value,
-                      resolution: m?.resolution || f.resolution,
-                    }));
-                  }}
-                >
-                  {modeCandidates.length === 0 && <option>Loading…</option>}
-                  {modeCandidates.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.id.replace("Skywork/SkyReels-V2-", "")} · {m.params}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {mode && mode.models.length > 0 && (
+                <div className="field">
+                  <label className="lbl" htmlFor="model">
+                    Model {activeModel && <span className="val">{activeModel.params}</span>}
+                  </label>
+                  <select
+                    id="model"
+                    value={modelId}
+                    onChange={(e) => {
+                      const m = mode.models.find((x) => x.id === e.target.value);
+                      setModelId(e.target.value);
+                      if (m) setResolution(m.resolution);
+                    }}
+                  >
+                    {mode.models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.id.replace(/^Skywork\/SkyReels-V\d-/, "")} · {m.params}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* resolution */}
-              <div className="field">
-                <label className="lbl">Resolution</label>
-                <div className="segmented">
-                  {["540P", "720P"].map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      data-active={form.resolution === r}
-                      onClick={() => set("resolution", r)}
-                    >
-                      {r}
-                      <span className="sub">{r === "540P" ? "960×544" : "1280×720"}</span>
-                    </button>
-                  ))}
+              {mode && mode.resolutions.length > 0 && (
+                <div className="field">
+                  <label className="lbl">Resolution</label>
+                  <div className="segmented">
+                    {mode.resolutions.map((r) => (
+                      <button key={r} type="button" data-active={resolution === r} onClick={() => setResolution(r)}>
+                        {r}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <Slider
-                label="Duration"
-                value={form.num_frames}
-                min={17}
-                max={form.mode === "df" ? 257 : 121}
-                step={4}
-                onChange={(v) => set("num_frames", v)}
-                display={`${form.num_frames}f · ${seconds}s`}
-                hint={longVideo ? "Long take → diffusion-forcing extension enabled" : undefined}
-              />
-
-              <Slider
-                label="Inference steps"
-                value={form.steps}
-                min={10}
-                max={50}
-                step={1}
-                onChange={(v) => set("steps", v)}
-                display={String(form.steps)}
-              />
-
-              <Slider
-                label="Guidance scale"
-                value={form.guidance}
-                min={1}
-                max={12}
-                step={0.5}
-                onChange={(v) => set("guidance", v)}
-                display={form.guidance.toFixed(1)}
-              />
+              {/* visible params */}
+              {visibleParams.map((p) => (
+                <ParamControl
+                  key={p.key}
+                  spec={p}
+                  value={paramValues[p.key]}
+                  fps={fps}
+                  onChange={(v) => setParam(p.key, v)}
+                />
+              ))}
 
               {/* seed */}
               <div className="field">
                 <label className="lbl" htmlFor="seed">
-                  Seed
-                  <span className="val">{form.seed === "" ? "random" : ""}</span>
+                  Seed <span className="val">{seed === "" ? "random" : ""}</span>
                 </label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
@@ -465,8 +423,8 @@ export default function Studio({ demo }: { demo: boolean }) {
                     type="text"
                     inputMode="numeric"
                     placeholder="random"
-                    value={form.seed}
-                    onChange={(e) => set("seed", e.target.value.replace(/[^0-9]/g, ""))}
+                    value={seed}
+                    onChange={(e) => setSeed(e.target.value.replace(/[^0-9]/g, ""))}
                   />
                   <button className="btn btn-ghost" type="button" onClick={randomizeSeed} title="Randomize seed">
                     <IconDice />
@@ -475,107 +433,44 @@ export default function Studio({ demo }: { demo: boolean }) {
               </div>
 
               {/* advanced */}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                style={{ width: "100%", marginBottom: showAdvanced ? 16 : 0 }}
-                onClick={() => setShowAdvanced((s) => !s)}
-              >
-                {showAdvanced ? "Hide" : "Show"} advanced parameters
-              </button>
-
-              {showAdvanced && (
-                <div style={{ marginBottom: 4 }}>
-                  <Slider
-                    label="Flow shift"
-                    value={form.shift}
-                    min={1}
-                    max={16}
-                    step={0.5}
-                    onChange={(v) => set("shift", v)}
-                    display={form.shift.toFixed(1)}
-                  />
-                  <Slider
-                    label="Frame rate"
-                    value={form.fps}
-                    min={8}
-                    max={30}
-                    step={1}
-                    onChange={(v) => set("fps", v)}
-                    display={`${form.fps} fps`}
-                  />
-                  {form.mode === "df" && (
-                    <>
-                      <Slider
-                        label="AR step"
-                        value={form.arStep}
-                        min={0}
-                        max={12}
-                        step={1}
-                        onChange={(v) => set("arStep", v)}
-                        display={form.arStep === 0 ? "sync" : `async ${form.arStep}`}
-                        hint="Asynchronous denoising for smoother long takes"
+              {advancedParams.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ width: "100%", marginBottom: showAdvanced ? 16 : 0 }}
+                    onClick={() => setShowAdvanced((s) => !s)}
+                  >
+                    {showAdvanced ? "Hide" : "Show"} advanced parameters
+                  </button>
+                  {showAdvanced &&
+                    advancedParams.map((p) => (
+                      <ParamControl
+                        key={p.key}
+                        spec={p}
+                        value={paramValues[p.key]}
+                        fps={fps}
+                        onChange={(v) => setParam(p.key, v)}
                       />
-                      <Slider
-                        label="Noise conditioning"
-                        value={form.addnoise}
-                        min={0}
-                        max={40}
-                        step={1}
-                        onChange={(v) => set("addnoise", v)}
-                        display={String(form.addnoise)}
-                        hint="~20 recommended for long-video consistency"
-                      />
-                      <Toggle
-                        label="Causal attention"
-                        desc="Enable AR attention blocks"
-                        on={form.causalAttention}
-                        onChange={(v) => set("causalAttention", v)}
-                      />
-                    </>
-                  )}
-                  <Toggle
-                    label="Prompt enhancer"
-                    desc="Expand the prompt with an LLM (T2V only)"
-                    on={form.promptEnhancer}
-                    onChange={(v) => set("promptEnhancer", v)}
-                  />
-                  <Toggle
-                    label="TeaCache"
-                    desc="Cache attention for faster sampling"
-                    on={form.teacache}
-                    onChange={(v) => set("teacache", v)}
-                  />
-                  <Toggle
-                    label="CPU offload"
-                    desc="Lower VRAM, slower generation"
-                    on={form.offload}
-                    onChange={(v) => set("offload", v)}
-                  />
-                </div>
+                    ))}
+                </>
               )}
 
               <button
                 className="btn btn-primary"
                 style={{ marginTop: 18 }}
-                disabled={busy}
+                disabled={busy || !mode}
                 onClick={onGenerate}
                 type="button"
               >
-                {busy ? (
-                  <>Rendering…</>
-                ) : (
-                  <>
-                    <IconBolt /> Generate video
-                  </>
-                )}
+                {busy ? <>Rendering…</> : <><IconBolt /> Generate video</>}
               </button>
 
               {demo && (
                 <div className="note info" style={{ marginTop: 14 }}>
                   <span>
                     Demo mode renders a synthetic preview. Set{" "}
-                    <span className="mono">SKYREELS_API_URL</span> to a GPU
+                    <span className="mono">SKYREELS_API_URL</span> to a V2 or V3
                     backend for real video.
                   </span>
                 </div>
@@ -584,39 +479,36 @@ export default function Studio({ demo }: { demo: boolean }) {
           </aside>
         </div>
 
-        {/* -------------------------------------------------- gallery */}
+        {/* gallery */}
         <div className="section-title">
           <h2>Session reel</h2>
-          <span className="count">{gallery.length} render{gallery.length === 1 ? "" : "s"}</span>
+          <span className="count">
+            {gallery.length} render{gallery.length === 1 ? "" : "s"}
+          </span>
         </div>
         {gallery.length === 0 ? (
-          <div className="empty-gallery">
-            Your renders from this session will collect here.
-          </div>
+          <div className="empty-gallery">Your renders from this session will collect here.</div>
         ) : (
           <div className="gallery">
             {gallery.map((g) => (
-              <GalleryCard key={g.id} job={g} onOpen={() => {
-                setJob(g);
-                viewportRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-              }} />
+              <GalleryCard
+                key={g.id}
+                job={g}
+                onOpen={() => {
+                  setJob(g);
+                  viewportRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+              />
             ))}
           </div>
         )}
 
-        {/* --------------------------------------------------- footer */}
         <footer className="foot">
+          <span>SkyReels V2 &amp; V3 · open-source film generation by Skywork AI.</span>
           <span>
-            SkyReels-V2 · AutoRegressive Diffusion-Forcing film model by Skywork AI.
-          </span>
-          <span>
-            <a href="https://github.com/SkyworkAI/SkyReels-V2" target="_blank" rel="noreferrer">
-              Model repo
-            </a>{" "}
-            ·{" "}
-            <a href="https://arxiv.org/pdf/2504.13074" target="_blank" rel="noreferrer">
-              Technical report
-            </a>
+            <a href="https://github.com/SkyworkAI/SkyReels-V2" target="_blank" rel="noreferrer">V2 repo</a>
+            {" · "}
+            <a href="https://github.com/SkyworkAI/SkyReels-V3" target="_blank" rel="noreferrer">V3 repo</a>
           </span>
         </footer>
       </main>
@@ -635,36 +527,25 @@ function Viewport({ job, demo }: { job: Job | null; demo: boolean }) {
 
   return (
     <div className={`viewport ${completed && !isDemoResult ? "playing" : ""}`}>
-      {/* empty */}
       {!job && (
         <div className="vp-empty">
           <div className="ring">
             <IconAperture />
           </div>
           <h4>The stage is set</h4>
-          <p>Write a prompt and hit Generate to roll your first frames.</p>
+          <p>Pick a mode, compose your inputs, and hit Generate.</p>
         </div>
       )}
 
-      {/* real completed video */}
       {completed && job?.video_url && !isDemoResult && (
-        <video
-          key={job.id}
-          src={job.video_url}
-          controls
-          autoPlay
-          loop
-          muted
-          playsInline
-        />
+        <video key={job.id} src={job.video_url} controls autoPlay loop muted playsInline />
       )}
 
-      {/* demo synthetic render */}
       {job && (isDemoResult || active) && (
         <div className="demo-render">
           <DemoFilm seed={seed} animate />
           <span className="demo-badge">{demo ? "Demo" : "Preview"}</span>
-          {isDemoResult && !active && (
+          {isDemoResult && !active && job.resolved_prompt && (
             <div className="demo-caption">
               <div className="q">“{job.resolved_prompt}”</div>
             </div>
@@ -672,7 +553,6 @@ function Viewport({ job, demo }: { job: Job | null; demo: boolean }) {
         </div>
       )}
 
-      {/* progress overlay */}
       {active && (
         <div className="render-status">
           <div className="rs-inner">
@@ -686,7 +566,6 @@ function Viewport({ job, demo }: { job: Job | null; demo: boolean }) {
         </div>
       )}
 
-      {/* failed */}
       {failed && (
         <div className="vp-empty">
           <div className="ring" style={{ color: "var(--coral)", borderColor: "rgba(255,106,69,0.4)" }}>
@@ -704,32 +583,16 @@ function ResultMeta({ job }: { job: Job }) {
   const p = job.params || {};
   return (
     <div className="result-meta">
-      <span className="chip">
-        seed <b className="mono">{job.seed}</b>
-      </span>
-      {typeof p.resolution === "string" && (
-        <span className="chip">
-          <b>{p.resolution}</b>
-        </span>
-      )}
-      {typeof p.num_frames === "number" && (
-        <span className="chip">
-          <b className="mono">{p.num_frames}</b> frames
-        </span>
-      )}
-      {job.elapsed_seconds != null && (
-        <span className="chip">
-          <b className="mono">{job.elapsed_seconds}s</b>
-        </span>
-      )}
+      <span className="chip">seed <b className="mono">{job.seed}</b></span>
+      {typeof p.resolution === "string" && <span className="chip"><b>{p.resolution}</b></span>}
+      {job.family && <span className="chip"><b>{job.family.toUpperCase()}</b></span>}
+      {job.elapsed_seconds != null && <span className="chip"><b className="mono">{job.elapsed_seconds}s</b></span>}
       {job.video_url ? (
         <a className="btn btn-ghost btn-sm" href={job.video_url} download style={{ marginLeft: "auto" }}>
           <IconDownload /> Download mp4
         </a>
       ) : (
-        <span className="chip" style={{ marginLeft: "auto" }}>
-          demo preview
-        </span>
+        <span className="chip" style={{ marginLeft: "auto" }}>demo preview</span>
       )}
     </div>
   );
@@ -748,11 +611,9 @@ function GalleryCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
         )}
       </div>
       <div className="gbody">
-        <div className="gp">{job.resolved_prompt || "Untitled render"}</div>
+        <div className="gp">{job.resolved_prompt || String(p.mode || "Render")}</div>
         <div className="gmeta">
-          <span>{String(p.mode || "").toUpperCase() || "T2V"}</span>
-          <span>·</span>
-          <span>{String(p.resolution || "")}</span>
+          <span>{String(p.mode || "").replace(/_/g, " ").toUpperCase() || "RENDER"}</span>
           <span>·</span>
           <span className="mono">#{job.seed}</span>
         </div>
@@ -761,45 +622,85 @@ function GalleryCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
   );
 }
 
+/* ---- dynamic media input ---- */
+
+function DynamicInput({
+  spec,
+  value,
+  onChange,
+}: {
+  spec: { kind: string; field: string; label: string; required?: boolean; min?: number; max?: number; allow_url?: boolean; accept?: string };
+  value: InputValue;
+  onChange: (v: InputValue) => void;
+}) {
+  if (spec.kind === "ref_images") {
+    return (
+      <RefImagesField
+        label={spec.label}
+        max={spec.max || 4}
+        values={Array.isArray(value) ? value : []}
+        onChange={(arr) => onChange(arr)}
+        allowUrl={spec.allow_url}
+      />
+    );
+  }
+  if (spec.kind === "video" || spec.kind === "audio") {
+    return (
+      <MediaUrlField
+        label={spec.label}
+        kind={spec.kind}
+        accept={spec.accept}
+        value={typeof value === "string" ? value : null}
+        onChange={(v) => onChange(v)}
+      />
+    );
+  }
+  // image / end_image
+  return (
+    <ImageField
+      label={spec.label}
+      value={typeof value === "string" ? value : null}
+      onChange={(v) => onChange(v)}
+      allowUrl={spec.allow_url}
+    />
+  );
+}
+
 function ImageField({
   label,
   value,
-  onPick,
-  onClear,
+  onChange,
+  allowUrl,
 }: {
   label: string;
   value: string | null;
-  onPick: (f: File | undefined) => void;
-  onClear: () => void;
+  onChange: (v: string | null) => void;
+  allowUrl?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showUrl, setShowUrl] = useState(false);
   return (
     <div className="field" style={{ marginBottom: 0 }}>
-      <label className="lbl">{label}</label>
-      <div
-        className={`dropzone ${value ? "filled" : ""}`}
-        onClick={() => !value && inputRef.current?.click()}
-      >
+      <label className="lbl">
+        {label}
+        {allowUrl && (
+          <button type="button" className="mini-link" onClick={() => setShowUrl((s) => !s)}>
+            <IconLink /> URL
+          </button>
+        )}
+      </label>
+      <div className={`dropzone ${value ? "filled" : ""}`} onClick={() => !value && inputRef.current?.click()}>
         {value ? (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={value} alt={label} />
-            <button
-              type="button"
-              className="dz-remove"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClear();
-              }}
-            >
+            <button type="button" className="dz-remove" onClick={(e) => { e.stopPropagation(); onChange(null); }}>
               <IconX />
             </button>
           </>
         ) : (
           <div className="dz-hint">
-            <div style={{ marginBottom: 6, color: "var(--amber)" }}>
-              <IconUpload />
-            </div>
+            <div style={{ marginBottom: 6, color: "var(--amber)" }}><IconUpload /></div>
             <b>Upload</b> an image
           </div>
         )}
@@ -808,10 +709,206 @@ function ImageField({
           type="file"
           accept="image/*"
           hidden
-          onChange={(e) => onPick(e.target.files?.[0])}
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            if (f) onChange(await fileToDataURL(f));
+          }}
         />
       </div>
+      {showUrl && !value && (
+        <input
+          type="text"
+          placeholder="https://…/image.png"
+          style={{ marginTop: 8 }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onChange((e.target as HTMLInputElement).value.trim() || null);
+          }}
+          onBlur={(e) => onChange(e.target.value.trim() || null)}
+        />
+      )}
     </div>
+  );
+}
+
+function RefImagesField({
+  label,
+  max,
+  values,
+  onChange,
+  allowUrl,
+}: {
+  label: string;
+  max: number;
+  values: string[];
+  onChange: (v: string[]) => void;
+  allowUrl?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [url, setUrl] = useState("");
+  const add = (v: string) => onChange([...values, v].slice(0, max));
+  const removeAt = (i: number) => onChange(values.filter((_, idx) => idx !== i));
+  return (
+    <div className="field" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
+      <label className="lbl">
+        <span><IconLayers /> {label}</span>
+        <span className="val">{values.length}/{max}</span>
+      </label>
+      <div className="ref-grid">
+        {values.map((v, i) => (
+          <div className="ref-slot filled" key={i}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={v} alt={`ref ${i + 1}`} />
+            <button type="button" className="dz-remove" onClick={() => removeAt(i)}>
+              <IconX />
+            </button>
+          </div>
+        ))}
+        {values.length < max && (
+          <div className="ref-slot add" onClick={() => inputRef.current?.click()}>
+            <IconPlus />
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (f) add(await fileToDataURL(f));
+              }}
+            />
+          </div>
+        )}
+      </div>
+      {allowUrl && values.length < max && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            type="text"
+            placeholder="or paste an image URL"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && url.trim()) {
+                add(url.trim());
+                setUrl("");
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              if (url.trim()) {
+                add(url.trim());
+                setUrl("");
+              }
+            }}
+          >
+            Add
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MediaUrlField({
+  label,
+  kind,
+  accept,
+  value,
+  onChange,
+}: {
+  label: string;
+  kind: "video" | "audio";
+  accept?: string;
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isData = value?.startsWith("data:");
+  return (
+    <div className="field" style={{ marginBottom: 0, gridColumn: "1 / -1" }}>
+      <label className="lbl">
+        <span>{kind === "video" ? <IconVideo /> : <IconAudio />} {label}</span>
+      </label>
+      {value ? (
+        <div className="media-filled">
+          <span className="media-name mono">{isData ? `uploaded ${kind}` : value}</span>
+          <button type="button" className="dz-remove static" onClick={() => onChange(null)}>
+            <IconX />
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="text"
+            placeholder={`https://…/${kind === "video" ? "clip.mp4" : "voice.mp3"}`}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onChange((e.target as HTMLInputElement).value.trim() || null);
+            }}
+            onBlur={(e) => e.target.value.trim() && onChange(e.target.value.trim())}
+          />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => inputRef.current?.click()}>
+            <IconUpload />
+          </button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept={accept || (kind === "video" ? "video/*" : "audio/*")}
+            hidden
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (f) onChange(await fileToDataURL(f));
+            }}
+          />
+        </div>
+      )}
+      <div className="mono field-hint">Paste a URL (recommended) or upload a small file.</div>
+    </div>
+  );
+}
+
+/* ---- dynamic parameter control ---- */
+
+function ParamControl({
+  spec,
+  value,
+  fps,
+  onChange,
+}: {
+  spec: ParamSpec;
+  value: number | boolean | undefined;
+  fps: number;
+  onChange: (v: number | boolean) => void;
+}) {
+  if (spec.kind === "bool") {
+    return (
+      <Toggle
+        label={spec.label}
+        desc={spec.hint}
+        on={value === true}
+        onChange={(v) => onChange(v)}
+      />
+    );
+  }
+  const num = typeof value === "number" ? value : (spec.default as number) ?? spec.min ?? 0;
+  let display: string;
+  if (spec.kind === "frames") display = `${num}f · ${(num / fps).toFixed(1)}s`;
+  else if (spec.kind === "seconds") display = `${num}s`;
+  else if (spec.kind === "float") display = `${num.toFixed(1)}${spec.unit || ""}`;
+  else display = `${num}${spec.unit || ""}`;
+
+  return (
+    <Slider
+      label={spec.label}
+      value={num}
+      min={spec.min ?? 0}
+      max={spec.max ?? 100}
+      step={spec.step ?? 1}
+      onChange={onChange}
+      display={display}
+      hint={spec.hint}
+    />
   );
 }
 
@@ -850,7 +947,7 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
       />
       {hint && (
-        <div className="mono" style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 7 }}>
+        <div className="mono field-hint" style={{ marginTop: 7 }}>
           {hint}
         </div>
       )}

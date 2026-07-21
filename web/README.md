@@ -1,10 +1,17 @@
-# SkyReels-V2 Studio — Vercel front-end
+# SkyReels Studio — Vercel front-end
 
-A cinematic web studio for the [SkyReels-V2](https://github.com/SkyworkAI/SkyReels-V2)
-video generation model. Deploy the UI to **Vercel** in a couple of clicks; point it at a
-GPU box running the bundled inference API when you're ready to render real video.
+A cinematic web studio for the open-source SkyReels film models —
+[SkyReels-V2](https://github.com/SkyworkAI/SkyReels-V2) **and**
+[SkyReels-V3](https://github.com/SkyworkAI/SkyReels-V3). Deploy the UI to **Vercel** in a
+couple of clicks; point it at a GPU box (or hosted API) running the inference server when
+you're ready to render real video.
 
-<p align="center"><em>Text-to-Video · Image-to-Video · Diffusion-Forcing long takes</em></p>
+<p align="center"><em>V2: Text-to-Video · Image-to-Video · Diffusion-Forcing &nbsp;|&nbsp; V3: Reference-to-Video · Video Extension · Talking Avatar</em></p>
+
+The UI is **capability-driven**: it reads the connected backend's `/api/models` and renders
+its controls from that. One front-end therefore drives either family — a V2 backend
+(`api_server.py` in this repo) or a V3 backend (`api_server.py` in the SkyReels-V3 repo).
+With no backend configured it runs a self-contained demo of every mode.
 
 ---
 

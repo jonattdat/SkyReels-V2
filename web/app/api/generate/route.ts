@@ -19,11 +19,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (isDemoMode()) {
+    // V2 sizes by frames; V3 sizes by seconds — normalize to a frame count.
+    const frames = Number(body.num_frames) || Number(body.duration) * 24 || 97;
     const job = createDemoJob({
       prompt,
       mode: (body.mode as string) || "t2v",
       resolution: (body.resolution as string) || "540P",
-      num_frames: Number(body.num_frames) || 97,
+      frames,
       seed: (body.seed as number) ?? null,
     });
     return NextResponse.json(job, { status: 202 });
