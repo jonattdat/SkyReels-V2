@@ -103,6 +103,87 @@ MODE_LABELS = {
     "df": "Diffusion Forcing",
 }
 
+FAMILY = "v2"
+FAMILY_LABEL = "SkyReels V2"
+
+
+def _models_for(mode: str) -> list[dict[str, Any]]:
+    return [{"id": m["id"], "params": m["params"], "resolution": m["resolution"]}
+            for m in MODEL_CATALOG if m["mode"] == mode]
+
+
+# Shared numeric/toggle parameter definitions (the UI renders controls from these).
+_P_STEPS = {"key": "inference_steps", "label": "Inference steps", "kind": "int",
+            "min": 10, "max": 50, "step": 1, "default": 30}
+_P_GUIDANCE = {"key": "guidance_scale", "label": "Guidance scale", "kind": "float",
+               "min": 1, "max": 12, "step": 0.5, "default": 6.0}
+_P_SHIFT = {"key": "shift", "label": "Flow shift", "kind": "float", "min": 1, "max": 16,
+            "step": 0.5, "default": 8.0, "advanced": True}
+_P_FPS = {"key": "fps", "label": "Frame rate", "kind": "int", "min": 8, "max": 30,
+          "step": 1, "default": 24, "advanced": True, "unit": " fps"}
+_P_TEACACHE = {"key": "teacache", "label": "TeaCache", "kind": "bool", "default": False,
+               "advanced": True, "hint": "Cache attention for faster sampling"}
+_P_OFFLOAD = {"key": "offload", "label": "CPU offload", "kind": "bool", "default": False,
+              "advanced": True, "hint": "Lower VRAM, slower generation"}
+
+# Capability specs consumed by the front-end. `inputs` = required/optional media,
+# `params` = numeric/toggle controls. Kept parallel to the V3 server's schema.
+MODE_SPECS: list[dict[str, Any]] = [
+    {
+        "id": "t2v", "label": "Text to Video", "family": FAMILY, "badge": "T2V",
+        "blurb": "Generate video straight from a text prompt.",
+        "models": _models_for("t2v"), "resolutions": list(RESOLUTIONS.keys()),
+        "prompt_required": True, "inputs": [],
+        "params": [
+            {"key": "num_frames", "label": "Duration", "kind": "frames", "min": 17, "max": 121,
+             "step": 4, "default": 97},
+            _P_STEPS, _P_GUIDANCE, _P_SHIFT, _P_FPS,
+            {"key": "prompt_enhancer", "label": "Prompt enhancer", "kind": "bool", "default": False,
+             "advanced": True, "hint": "Expand the prompt with an LLM (T2V only)"},
+            _P_TEACACHE, _P_OFFLOAD,
+        ],
+    },
+    {
+        "id": "i2v", "label": "Image to Video", "family": FAMILY, "badge": "I2V",
+        "blurb": "Animate a source image, guided by a text prompt.",
+        "models": _models_for("i2v"), "resolutions": list(RESOLUTIONS.keys()),
+        "prompt_required": True,
+        "inputs": [
+            {"kind": "image", "field": "image", "label": "Source image", "required": True,
+             "allow_url": True, "accept": "image/*"},
+        ],
+        "params": [
+            {"key": "num_frames", "label": "Duration", "kind": "frames", "min": 17, "max": 121,
+             "step": 4, "default": 97},
+            _P_STEPS, _P_GUIDANCE, _P_SHIFT, _P_FPS, _P_TEACACHE, _P_OFFLOAD,
+        ],
+    },
+    {
+        "id": "df", "label": "Diffusion Forcing", "family": FAMILY, "badge": "DF",
+        "blurb": "Long-form / infinite video with optional start and end frame control.",
+        "models": _models_for("df"), "resolutions": list(RESOLUTIONS.keys()),
+        "prompt_required": True,
+        "inputs": [
+            {"kind": "image", "field": "image", "label": "Start frame (optional)", "required": False,
+             "allow_url": True, "accept": "image/*"},
+            {"kind": "image", "field": "end_image", "label": "End frame (optional)", "required": False,
+             "allow_url": True, "accept": "image/*"},
+        ],
+        "params": [
+            {"key": "num_frames", "label": "Duration", "kind": "frames", "min": 17, "max": 257,
+             "step": 4, "default": 97},
+            _P_STEPS, _P_GUIDANCE, _P_SHIFT, _P_FPS,
+            {"key": "ar_step", "label": "AR step", "kind": "int", "min": 0, "max": 12, "step": 1,
+             "default": 0, "advanced": True, "hint": "Asynchronous denoising for smoother long takes"},
+            {"key": "addnoise_condition", "label": "Noise conditioning", "kind": "int", "min": 0,
+             "max": 40, "step": 1, "default": 0, "advanced": True, "hint": "~20 aids long-video consistency"},
+            {"key": "causal_attention", "label": "Causal attention", "kind": "bool", "default": False,
+             "advanced": True, "hint": "Enable AR attention blocks"},
+            _P_TEACACHE, _P_OFFLOAD,
+        ],
+    },
+]
+
 
 # --------------------------------------------------------------------------- #
 # Request / response schemas
@@ -574,8 +655,9 @@ async def health() -> dict[str, Any]:
 @app.get("/api/models", dependencies=[Depends(require_api_key)])
 async def models() -> dict[str, Any]:
     return {
-        "models": MODEL_CATALOG,
-        "modes": [{"id": k, "label": v} for k, v in MODE_LABELS.items()],
+        "family": FAMILY,
+        "label": FAMILY_LABEL,
+        "modes": MODE_SPECS,
         "resolutions": list(RESOLUTIONS.keys()),
     }
 

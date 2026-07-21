@@ -1,9 +1,20 @@
 import { NextResponse } from "next/server";
 import { backendFetch, isDemoMode } from "@/lib/backend";
+import { isCloud } from "@/lib/skyreelsCloud";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  if (isCloud()) {
+    return NextResponse.json({
+      status: "ok",
+      provider: "skyreels-cloud",
+      demo: false,
+      mock: false,
+      gpu_available: true,
+      backend_configured: true,
+    });
+  }
   if (isDemoMode()) {
     return NextResponse.json({
       status: "ok",
