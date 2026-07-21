@@ -1,0 +1,27 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+/build
+next-env.d.ts
+*.tsbuildinfo
+
+# misc
+.DS_Store
+*.pem
+.vercel
+
+# local env files
+.env
+.env*.local
+
+# The repo root .gitignore ignores *.json globally (for model configs).
+# Re-include the web app's config files so the project is committable.
+!package.json
+!package-lock.json
+!tsconfig.json
+!vercel.json
