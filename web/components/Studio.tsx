@@ -123,6 +123,31 @@ export default function Studio({ demo }: { demo: boolean }) {
     };
   }, [job?.id, job?.status, demo]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* persist the session reel across refreshes (hosted results stay valid ~30 days) */
+  const reelLoaded = useRef(false);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("skyreels_reel");
+      if (saved) {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr) && arr.length) setGallery(arr);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  useEffect(() => {
+    if (!reelLoaded.current) {
+      reelLoaded.current = true;
+      return;
+    }
+    try {
+      localStorage.setItem("skyreels_reel", JSON.stringify(gallery));
+    } catch {
+      /* ignore */
+    }
+  }, [gallery]);
+
   const familyGroups = useMemo(() => {
     const order: string[] = [];
     const map = new Map<string, ModeSpec[]>();
@@ -590,7 +615,7 @@ function ResultMeta({ job }: { job: Job }) {
       {typeof p.cost_credits === "number" && <span className="chip"><b className="mono">{p.cost_credits}</b> credits</span>}
       {job.elapsed_seconds != null && <span className="chip"><b className="mono">{job.elapsed_seconds}s</b></span>}
       {job.video_url ? (
-        <a className="btn btn-ghost btn-sm" href={job.video_url} download style={{ marginLeft: "auto" }}>
+        <a className="btn btn-ghost btn-sm" href={`/api/jobs/${job.id}/video`} download style={{ marginLeft: "auto" }}>
           <IconDownload /> Download mp4
         </a>
       ) : (

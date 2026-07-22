@@ -12,12 +12,15 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "SkyReels-V2 Studio · Infinite-Length Film Generation",
+  title: "SkyReels Studio · Generative Film",
   description:
-    "A cinematic web studio for the SkyReels-V2 video generation model — text-to-video, image-to-video, and diffusion-forcing long-form generation.",
+    "A cinematic web studio for the SkyReels V2 & V3 video generation models — text/image/reference-to-video, video extension, and talking avatars.",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
   },
+  // Result videos are hosted on a bucket that blocks unknown referers; send none
+  // so the browser can load them cross-origin.
+  referrer: "no-referrer",
 };
 
 export const viewport: Viewport = {

@@ -284,6 +284,22 @@ export async function cloudGenerate(input: Record<string, unknown>): Promise<Clo
 
 /* ------------------------------------------------------------- poll */
 
+/** Resolve just the result video URL for a completed cloud task (for proxying). */
+export async function cloudResultUrl(id: string): Promise<string | null> {
+  const [mode, , ...rest] = id.split(".");
+  const taskId = rest.join(".");
+  const ep = ENDPOINT[mode];
+  if (!ep) return null;
+  try {
+    const res = await cloudFetch(`/api/v1/video/${ep}/task/${encodeURIComponent(taskId)}`, {}, 15_000);
+    const data = (await res.json()) as Record<string, unknown>;
+    const d = (data.data || {}) as Record<string, unknown>;
+    return d.video_url ? httpsUpgrade(String(d.video_url)) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function cloudPoll(id: string): Promise<Job> {
   const [mode, startStr, ...rest] = id.split(".");
   const taskId = rest.join(".");
